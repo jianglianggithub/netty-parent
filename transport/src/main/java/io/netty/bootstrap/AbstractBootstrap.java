@@ -368,6 +368,9 @@ public abstract class AbstractBootstrap<B extends AbstractBootstrap<B,C>, C exte
          *  DefaultChannelPromise返回的是 封装了 NioServerScoketChannel 和 他对应所属的 事件循环
          *  \
          *  doRegist是异步的 后续 执行 在注册之前添加的handle的HandleAdd方法 和所有 ctx的handle的ChannleRegist方法
+         *
+         *
+         *  由boss 线程组 来注册到 对应的 worker group eventLoop中
          */
         ChannelFuture regFuture = config().group().register(channel);
 

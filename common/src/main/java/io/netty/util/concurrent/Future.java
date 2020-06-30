@@ -159,6 +159,7 @@ public interface Future<V> extends java.util.concurrent.Future<V> {
     boolean awaitUninterruptibly(long timeoutMillis);
 
     /**
+     *   直接返回不阻塞
      * Return the result without blocking. If the future is not done yet this will return {@code null}.
      *
      * As it is possible that a {@code null} value is used to mark the future as successful you also need to check

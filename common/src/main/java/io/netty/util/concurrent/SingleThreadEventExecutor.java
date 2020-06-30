@@ -895,11 +895,15 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         if (task == null) {
             throw new NullPointerException("task");
         }
-
+        // 提交任务是否是当前线程
         boolean inEventLoop = inEventLoop();
         // 加入到 task 任务队列中 jtc中得 无锁队列
         addTask(task);
-        //只有当前线程  不是 EventLoop对应得线程 那么代表不是异步执行 或者说  错乱执行【感觉好像不可能发生？】
+        /**
+         *   如果不会当前EventLoop 的线程 那么启动 这个线程。。其实这个和juc 的线程池 有一分相似之处。
+         *   只不过 juc 的线程池 多个worker 共享一个 queue 而 netty中的线程池 没一个 loop 都是抽象城了一个当线程 线程池 每个loop
+         *   都有自己的 阻塞队列
+         */
         if (!inEventLoop) {
             startThread();
             if (isShutdown()) {
@@ -918,7 +922,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                 }
             }
         }
-
+        // 如果 执行任务的线程 在 park 了 那么唤醒 执行任务。
         if (!addTaskWakesUp && wakesUpForTask(task)) {
             wakeup(inEventLoop);
         }
@@ -1018,7 +1022,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     private void startThread() {
         if (state == ST_NOT_STARTED) {
-            // cas 暂时不看
+            // 改成 start 状态
             if (STATE_UPDATER.compareAndSet(this, ST_NOT_STARTED, ST_STARTED)) {
                 boolean success = false;   //这个相当于  Futrue 中得 result  未来式 中 观察者模式中得 target
                 try {
@@ -1053,6 +1057,9 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
 
     private void doStartThread() {
         assert thread == null;
+        // executor 这个 executor 就是 直接 new NioEventLoop 的时候 创建的 封装了 ThreadPreTaskFacotry
+        // 在new Thread .run 执行这个run 之前暴露 执行这个任务对应的 eventLoop
+        // 其实这就是一个完整的线程池思想的改良。
         executor.execute(new Runnable() {
             @Override
             public void run() {
@@ -1065,7 +1072,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                 boolean success = false;
                 updateLastExecutionTime();
                 try {
-                    SingleThreadEventExecutor.this.run();  //执行NioEventLoop 中得 run方法 会 开启监听 选择器中对应得时间发生
+                    SingleThreadEventExecutor.this.run();  //执行NioEventLoop[或者 其他Loop] 中得 run方法 会 开启监听 选择器中对应得时间发生
                     success = true;
                 } catch (Throwable t) {
                     logger.warn("Unexpected exception from an event executor: ", t);
