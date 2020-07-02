@@ -33,6 +33,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 class UnpaddedInternalThreadLocalMap {
 
     static final ThreadLocal<InternalThreadLocalMap> slowThreadLocalMap = new ThreadLocal<InternalThreadLocalMap>();
+    //每一个fastThreadLocal 有自己的 唯一index。全局唯一
     static final AtomicInteger nextIndex = new AtomicInteger();
 
     /** Used by {@link FastThreadLocal} */

@@ -90,7 +90,7 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
 
 
 
-         //  缓存分配器 至于使用 Unpooled 还是Pooled 看是否是安卓  是否使用直接内存 看有没有设置 jvm参数 如果由则使用 否则false 【取反】
+        //  缓存分配器 至于使用 Unpooled 还是Pooled 看是否是安卓  是否使用直接内存 看有没有设置 jvm参数 如果由则使用 否则false 【取反】
         //在真正分配 缓冲区得时候 是否使用 直接缓冲区 取决于 是否存在 Unsafe这个类
         ByteBufAllocator allocator = config.getAllocator();  //获取  创建缓存得 分配器类
         RecvByteBufAllocator recvByteBufAllocator = config.getRecvByteBufAllocator(); // 获取   获取缓存分配大小 得类

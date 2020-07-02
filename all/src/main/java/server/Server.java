@@ -89,8 +89,7 @@ public class Server {
                 });
         ChannelFuture channelFuture = serverBootstrap.bind(2333);
         channelFuture.sync();
-        //  获取 对应得通道  由异步得等待 对方退出变为 同步等待
-        channelFuture.channel().closeFuture().sync();
+
 
 
         bos.shutdownGracefully();

@@ -1055,6 +1055,14 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         return false;
     }
 
+    /**
+     *
+     *  每一个Loop 当提交任务得时候 判断state 是否启动 没启动 直接new 一个线程 执行 this.run 方法
+     *  那么 后续再次提交任务 自然 为 start状态 那么 直接提交到 队列中
+     *
+     *
+     *
+     */
     private void doStartThread() {
         assert thread == null;
         // executor 这个 executor 就是 直接 new NioEventLoop 的时候 创建的 封装了 ThreadPreTaskFacotry
@@ -1077,7 +1085,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                 } catch (Throwable t) {
                     logger.warn("Unexpected exception from an event executor: ", t);
                 } finally {
-                    // 自旋锁。===具体不详【意图】
+                    // 改变状态 ST_SHUTTING_DOWN
                     for (;;) {
                         int oldState = state;
                         if (oldState >= ST_SHUTTING_DOWN || STATE_UPDATER.compareAndSet(
@@ -1113,6 +1121,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
                             // the future. The user may block on the future and once it unblocks the JVM may terminate
                             // and start unloading classes.
                             // See https://github.com/netty/netty/issues/6596.
+                            // 删除当前线程 的所有 缓存的FastThreadLocal
                             FastThreadLocal.removeAll();
 
                             STATE_UPDATER.set(SingleThreadEventExecutor.this, ST_TERMINATED);

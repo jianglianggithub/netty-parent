@@ -45,6 +45,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
     private final Channel parent;
     private final ChannelId id;
+    /**
+     *  netty中的unsafe 内部类实现真正的io操作  netty抽出来的公有类 很多。理解后其实很简单。【我现在还理解不了。妈个比】
+     */
     private final Unsafe unsafe;
     private final DefaultChannelPipeline pipeline;
     private final VoidChannelPromise unsafeVoidPromise = new VoidChannelPromise(this, false);
