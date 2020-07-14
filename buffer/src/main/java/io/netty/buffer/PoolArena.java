@@ -42,9 +42,9 @@ abstract class PoolArena<T> implements PoolArenaMetric {
 
     final PooledByteBufAllocator parent;
 
-    private final int maxOrder;
+    private final int maxOrder;//树的高度
     final int pageSize;
-    final int pageShifts;
+    final int pageShifts;// 8192 是2的指数倍 多少倍
     final int chunkSize;
     final int subpageOverflowMask;
     final int numSmallSubpagePools;
@@ -89,6 +89,11 @@ abstract class PoolArena<T> implements PoolArenaMetric {
     // TODO: Test if adding padding helps under contention
     //private long pad0, pad1, pad2, pad3, pad4, pad5, pad6, pad7;
 
+    /**
+        chunkSize pageSize 其实是有规律的 那就是2的指数倍 这样能构建一个 完全二叉树
+        16mb / 8192 bytes 正好就是2048 个叶子节点。 所以这个是有规律的
+     */
+
     protected PoolArena(PooledByteBufAllocator parent, int pageSize,
           int maxOrder, int pageShifts, int chunkSize, int cacheAlignment) {
         this.parent = parent;
@@ -110,6 +115,13 @@ abstract class PoolArena<T> implements PoolArenaMetric {
             smallSubpagePools[i] = newSubpagePoolHead(pageSize);
         }
 
+        /*
+            排序的原因在于知道对应 chunkList存储的对应chunk中内存的占用比之后在分配内存的时候能更快的找到对应区间的chunk
+            因为 好比要分配一个 16m的内存块 总不可能去 c100 里面去找吧
+
+            qInit 中 初始化分配处于这个list 在小于25占用比的时候是不会回收的。
+            因为 类似于 缓存的线程池  频繁的回收 申请 内存也是非常的耗时的 所以缓存一些固定的缓冲区 有助于性能。
+        */
         q100 = new PoolChunkList<T>(this, null, 100, Integer.MAX_VALUE, chunkSize);
         q075 = new PoolChunkList<T>(this, q100, 75, 100, chunkSize);
         q050 = new PoolChunkList<T>(this, q075, 50, 100, chunkSize);

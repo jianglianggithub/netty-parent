@@ -145,6 +145,11 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
 
                 // 将处理  通过链接得  handle 稍后在添加到管道 其原因 是因为当前 还没有注册 和bind 端口和改变注册在选择器上得事件
                 // 所以这个处理器 不需要提早得 加入到通道
+
+                /**
+                 *  因为在执行这个的时候 还没有完成绑定端口。 我猜想可能是这样。 因为绑定端口 是由 headContext 来完成的。
+                 *  所以在执行这个 Hadnle 的时候 现在添加进去没啥用
+                 */
                 ch.eventLoop().execute(new Runnable() {
                     @Override
                     public void run() {
@@ -207,6 +212,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
             // 给 reactor中 创建 链接的线程 传过来的 channle 设置 一些 初始化netty的一些属性
             final Channel child = (Channel) msg;
 
+            // addLast 在regist之前。所以 handleAdd 只会执行一次。
             child.pipeline().addLast(childHandler);
 
             setChannelOptions(child, childOptions, logger);
@@ -214,6 +220,7 @@ public class ServerBootstrap extends AbstractBootstrap<ServerBootstrap, ServerCh
 
             try {
                 // 异步去 注册 监听的事件 并且 异步的 回调 如果 没有regist成功那么 直接 关闭这个channel
+                // muiltiGroup
                 childGroup.register(child).addListener(new ChannelFutureListener() {
                     @Override
                     public void operationComplete(ChannelFuture future) throws Exception {

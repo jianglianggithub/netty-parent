@@ -514,7 +514,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
                 //  add到管道中 在注册之前的 handle 在注册之后会 被 统一调用   注册之后add的 会在注册的时候 直接调用 HandleAdd方法
                 pipeline.invokeHandlerAddedIfNeeded();
 
-                safeSetSuccess(promise);
+                safeSetSuccess(promise);// 回调设置 success
                 pipeline.fireChannelRegistered();
                 // Only fire a channelActive if the channel has never been registered. This prevents firing
                 // multiple channel actives if the channel is deregistered and re-registered.

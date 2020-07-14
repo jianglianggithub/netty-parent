@@ -3,6 +3,7 @@ package server;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
+import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
 import io.netty.channel.nio.NioEventLoop;
@@ -71,7 +72,7 @@ public class Server {
 
     public static void main(String[] args) throws Exception {
 
-
+        PooledByteBufAllocator.DEFAULT.buffer();
 
         final NioEventLoopGroup bos = new NioEventLoopGroup(1);
         final NioEventLoopGroup woker = new NioEventLoopGroup();

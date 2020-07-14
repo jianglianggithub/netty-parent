@@ -1122,7 +1122,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
             assert !registered;
 
             // This Channel itself was registered.
-            registered = true; //已注册。后续的注册 的handle将不会在执行回调
+            registered = true; //已注册。防止重复注册
 
             pendingHandlerCallbackHead = this.pendingHandlerCallbackHead;
             // Null out so it can be GC'ed.

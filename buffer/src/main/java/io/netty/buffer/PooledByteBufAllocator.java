@@ -41,8 +41,16 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator implements 
     private static final int DEFAULT_NUM_HEAP_ARENA;
     private static final int DEFAULT_NUM_DIRECT_ARENA;
 
+    public static void main(String[] args) {
+        System.out.println(Integer.numberOfLeadingZeros(8192));
+    }
     private static final int DEFAULT_PAGE_SIZE;
-    private static final int DEFAULT_MAX_ORDER; // 8192 << 11 = 16 MiB per chunk
+
+
+    // 8192 << 11 = 16 MiB per chunk   默认一个页 = 8192 bytes * 2^11  = 15mb 这个值好像还代表了 数的高度
+    private static final int DEFAULT_MAX_ORDER;
+
+
     private static final int DEFAULT_TINY_CACHE_SIZE;
     private static final int DEFAULT_SMALL_CACHE_SIZE;
     private static final int DEFAULT_NORMAL_CACHE_SIZE;
@@ -248,6 +256,9 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator implements 
 
         int pageShifts = validateAndCalculatePageShifts(pageSize);
 
+        /**
+         *  在实例化 的时候 创建所有 线程共享的Area 内存块 还有heap 本质上 heapArenas 也是继承了 PooleadArenas 只是泛型不同
+         */
         if (nHeapArena > 0) {
             heapArenas = newArenaArray(nHeapArena);
             List<PoolArenaMetric> metrics = new ArrayList<PoolArenaMetric>(heapArenas.length);
@@ -443,8 +454,10 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator implements 
         threadCache.remove();
     }
 
+
+    // PoolThreadLocalCache 也是一个 ThreadLocal 。只不过泛型 是 PoolThreadCache
     final class PoolThreadLocalCache extends FastThreadLocal<PoolThreadCache> {
-        private final boolean useCacheForAllThreads;
+        private final boolean useCacheForAllThreads; // 是否允许 非 netty
 
         PoolThreadLocalCache(boolean useCacheForAllThreads) {
             this.useCacheForAllThreads = useCacheForAllThreads;
@@ -452,6 +465,7 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator implements 
 
         @Override
         protected synchronized PoolThreadCache initialValue() {
+
             // 每个线程 NioEventLoop对应的线程 会在 PooledByteBufAllocator.defualt 中的directArenas 或者HeapS 中选取一个 内存池出来
             // 与之对应 绑定 放在 FastThreadLocal中
             final PoolArena<byte[]> heapArena = leastUsedArena(heapArenas);

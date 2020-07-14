@@ -94,7 +94,7 @@ public class NioServerSocketChannel extends AbstractNioMessageChannel
         //在真正分配 缓冲区得时候 是否使用 直接缓冲区 取决于 是否存在 Unsafe这个类
         ByteBufAllocator allocator = config.getAllocator();  //获取  创建缓存得 分配器类
         RecvByteBufAllocator recvByteBufAllocator = config.getRecvByteBufAllocator(); // 获取   获取缓存分配大小 得类
-        ByteBuf allocate = recvByteBufAllocator.newHandle().allocate(allocator);
+        //ByteBuf allocate = recvByteBufAllocator.newHandle().allocate(allocator);
          //Pooled和Unpooled  得区别是  前者 netty会自己申请一块堆外内存【内存池】，然后构造缓冲区得时候 在这快大 内存中 创建一个缓冲区
          // 后者 会使用jdk 得api 来创建 堆内 或者堆外内存
 
