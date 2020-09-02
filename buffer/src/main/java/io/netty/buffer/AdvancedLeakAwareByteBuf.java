@@ -825,6 +825,7 @@ final class AdvancedLeakAwareByteBuf extends SimpleLeakAwareByteBuf {
     public short readShortLE() {
         recordLeakNonRefCountingOperation(leak);
         return super.readShortLE();
+
     }
 
     @Override

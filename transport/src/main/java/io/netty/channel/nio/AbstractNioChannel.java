@@ -349,9 +349,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
 
         @Override
         protected final void flush0() {
-            // Flush immediately only when there's no pending flush.
-            // If there's a pending flush operation, event loop will call forceFlush() later,
-            // and thus there's no need to call it now.
+            // 检测是否注册了写事件 如果注册了写事件 那么 手动调用flush无效因为 这样代表已近在等待 写事件就绪了
             if (!isFlushPending()) {
                 super.flush0();
             }
@@ -362,7 +360,7 @@ public abstract class AbstractNioChannel extends AbstractChannel {
             // directly call super.flush0() to force a flush now
             super.flush0();
         }
-
+        // 写事件是否 就绪在写。但是netty有 监听写事件？
         private boolean isFlushPending() {
             SelectionKey selectionKey = selectionKey();
             return selectionKey.isValid() && (selectionKey.interestOps() & SelectionKey.OP_WRITE) != 0;

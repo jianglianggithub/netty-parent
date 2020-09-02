@@ -383,7 +383,10 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
         SocketChannel ch = javaChannel();
         int writeSpinCount = config().getWriteSpinCount();
+
+        // 一共写入 16 次 每次最多1024个buffer 避免 将socket 缓冲区写满了
         do {
+
             if (in.isEmpty()) {
                 // All written so clear OP_WRITE
                 clearOpWrite();
@@ -393,12 +396,21 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
 
             // Ensure the pending writes are made of ByteBufs only.
             int maxBytesPerGatheringWrite = ((NioSocketChannelConfig) config).getMaxBytesPerGatheringWrite();
+
+            // 一次写入 到 javaScocket 缓冲区中的bytebuffer个数 是 1024个
+            // 遍历所有 flushNode 得到所有 在此之前 write(msg) bytebuffer 的个数 和本次 缓冲区个数 写入 socket 的 bytes count
+            // 如果遇到 FileRegion 直接 break 那么 将前面的 byteBuffer 写完后 再次进去 直接 返回 0 直接就写 FileRegion 了
+            // 然后写完 为止 后 nextNode = null tailNode = null 就清空了。
             ByteBuffer[] nioBuffers = in.nioBuffers(1024, maxBytesPerGatheringWrite);
             int nioBufferCnt = in.nioBufferCount();
 
-            // Always us nioBuffers() to workaround data-corruption.
+            // 我们把ByteBuffers缓存中channeloutboundbuffer.nioBuffers（）
+            // 以减少一些开销。问题是，如果发生不完整的写入，而下次尝试执行非收集写入时，这可能会导致数据损坏。
+            //  为了解决这个问题，我们应该删除缓存，这对我们没有多大帮助，只是让代码有问题。
             // See https://github.com/netty/netty/issues/2761
+
             switch (nioBufferCnt) {
+                // 就是实现了 FileRegion 接口后可以自己来实现写入socket中的东西 在nioBuffers 并不会识别出这个是 bytebuf
                 case 0:
                     // We have something else beside ByteBuffers to write so fallback to normal writes.
                     writeSpinCount -= doWrite0(in);
@@ -408,14 +420,14 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                     // Zero length buffers are not added to nioBuffers by ChannelOutboundBuffer, so there is no need
                     // to check if the total size of all the buffers is non-zero.
                     ByteBuffer buffer = nioBuffers[0];
-                    int attemptedBytes = buffer.remaining();
+                    int attemptedBytes = buffer.remaining();// write字节
                     final int localWrittenBytes = ch.write(buffer);
                     if (localWrittenBytes <= 0) {
-                        incompleteWrite(true);
+                        incompleteWrite(true);//可能因为各种原因导致写到 缓冲区的字节数为0 那么监听写事件等待缓冲区可写后 再次写入
                         return;
                     }
-                    adjustMaxBytesPerGatheringWrite(attemptedBytes, localWrittenBytes, maxBytesPerGatheringWrite);
-                    in.removeBytes(localWrittenBytes);
+                    adjustMaxBytesPerGatheringWrite(attemptedBytes, localWrittenBytes, maxBytesPerGatheringWrite);// 根据写入情况动态调整 最大写入大小？
+                    in.removeBytes(localWrittenBytes);// 如果 设置了特殊的 promise 那么回调  替换 flushNode = flushNode.nextNode
                     --writeSpinCount;
                     break;
                 }
@@ -432,14 +444,19 @@ public class NioSocketChannel extends AbstractNioByteChannel implements io.netty
                     // Casting to int is safe because we limit the total amount of data in the nioBuffers to int above.
                     adjustMaxBytesPerGatheringWrite((int) attemptedBytes, (int) localWrittenBytes,
                             maxBytesPerGatheringWrite);
+
                     in.removeBytes(localWrittenBytes);
                     --writeSpinCount;
                     break;
                 }
             }
+
+
         } while (writeSpinCount > 0);
 
-        incompleteWrite(writeSpinCount < 0);
+        // 走到这儿 缓存在线程本地变量中的 NiobyteBuffer[] 都是缓存着的。
+
+        incompleteWrite(writeSpinCount < 0);// 只要正常情况 肯定是 false
     }
 
     @Override

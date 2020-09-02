@@ -678,7 +678,7 @@ public final class PlatformDependent {
      */
     public static ByteBuffer allocateDirectNoCleaner(int capacity) {
         assert USE_DIRECT_BUFFER_NO_CLEANER;
-
+        // 判断使用的 直接内存如果超过 4个g 默认情况 直接 抛出异常
         incrementMemoryCounter(capacity);
         try {
             return PlatformDependent0.allocateDirectNoCleaner(capacity);
@@ -722,7 +722,7 @@ public final class PlatformDependent {
     private static void incrementMemoryCounter(int capacity) {
         if (DIRECT_MEMORY_COUNTER != null) {
             long newUsedMemory = DIRECT_MEMORY_COUNTER.addAndGet(capacity);
-            if (newUsedMemory > DIRECT_MEMORY_LIMIT) {
+            if (newUsedMemory > DIRECT_MEMORY_LIMIT) {// 最大使用的直接内存 默认好像是 4个g
                 DIRECT_MEMORY_COUNTER.addAndGet(-capacity);
                 throw new OutOfDirectMemoryError("failed to allocate " + capacity
                         + " byte(s) of direct memory (used: " + (newUsedMemory - capacity)
@@ -1063,6 +1063,9 @@ public final class PlatformDependent {
         return vmName.equals("IKVM.NET");
     }
 
+    public static void main(String[] args) {
+
+    }
     private static long maxDirectMemory0() {
         long maxDirectMemory = 0;
 

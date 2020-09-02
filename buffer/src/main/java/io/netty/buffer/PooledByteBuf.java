@@ -33,6 +33,7 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
 
     protected PoolChunk<T> chunk;
     protected long handle;
+    // 所有 池化缓冲区 都指向对应 chunk的bytebuffer
     protected T memory;
     protected int offset;
     protected int length;
@@ -167,7 +168,9 @@ abstract class PooledByteBuf<T> extends AbstractReferenceCountedByteBuf {
             final long handle = this.handle;
             this.handle = -1;
             memory = null;
+
             chunk.arena.free(chunk, tmpNioBuf, handle, maxLength, cache);
+
             tmpNioBuf = null;
             chunk = null;
             recycle();

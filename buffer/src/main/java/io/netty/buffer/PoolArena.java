@@ -83,7 +83,7 @@ abstract class PoolArena<T> implements PoolArenaMetric {
     // We need to use the LongCounter here as this is not guarded via synchronized block.
     private final LongCounter deallocationsHuge = PlatformDependent.newLongCounter();
 
-    // 被reactor 线程使用的次数 NioEventLoop
+    // 当前Arena 被线程 占用的次数。 ，每个线程都会选取一个Arena 分配内存
     final AtomicInteger numThreadCaches = new AtomicInteger();
 
     // TODO: Test if adding padding helps under contention
@@ -134,6 +134,8 @@ abstract class PoolArena<T> implements PoolArenaMetric {
         q050.prevList(q025);
         q025.prevList(q000);
         q000.prevList(null);
+        /* q000 前驱节点不存在 主要是为了 在递归扫list的时候 不在回到 init节点 */
+
         qInit.prevList(qInit);
 
         List<PoolChunkListMetric> metrics = new ArrayList<PoolChunkListMetric>(6);
@@ -171,7 +173,7 @@ abstract class PoolArena<T> implements PoolArenaMetric {
     }
 
     static int smallIdx(int normCapacity) {
-        int tableIdx = 0;
+        int tableIdx = 0;// 512 1000000000
         int i = normCapacity >>> 10;
         while (i != 0) {
             i >>>= 1;
@@ -197,18 +199,25 @@ abstract class PoolArena<T> implements PoolArenaMetric {
             首先根据分配的缓冲区大小 计算得出一个 属于netty的 容量 分区  <=512 每次加16  >512 后 是 乘以2 的倍数 在这个区间找一个 容量值
              找到之后 判断 <8192 那么就去 tany  small 中找对应的 subpage 如果有之前 缓存在其中的 节点那么直接 拿来分配
             如果没有 从 所有chunkList 中 找可用的 chunk 如果都没有那么 新建chunk 然后加入到 initChunkList中
+
+            在缓存中分配 不用加 syn 在Arena中分配需要加锁 所以才有了cache这个东西
      */
     private void allocate(PoolThreadCache cache, PooledByteBuf<T> buf, final int reqCapacity) {
         final int normCapacity = normalizeCapacity(reqCapacity);  // 得到 补值后的 缓冲区大小
                                                                                                                 // 如果小于512 那么不足16补足16  如果>=512  <16mb的的不足 的 补足成2的指数幂
-        if (isTinyOrSmall(normCapacity)) { // capacity < pageSize 【8192】
+        if (isTinyOrSmall(normCapacity)) { // capacity < pageSize 【8192】 那么首先从 subPage 数组中分配
             int tableIdx;
             PoolSubpage<T>[] table;
-            boolean tiny = isTiny(normCapacity);  // < 512 = tiny  >=512 < 8192 = small    >=8192 =chunk 下的page
+            boolean tiny = isTiny(normCapacity);
+            // < 512 = tiny
+            // >=512 < 8192 = small
+            // >=8192 =chunk 下的page
 
             // 下面 首先 计算得出 对应容量 在 tiny或small 数组中的节点
             if (tiny) { // < 512
-                if (cache.allocateTiny(this, buf, reqCapacity, normCapacity)) {
+
+                // 如果是在缓存中分配成功的话  那么entry 保留的handle 来计算 offset
+                if (cache.allocateTiny(this, buf, reqCapacity, normCapacity)) {// 从本地缓存中分配 如果分配到了 就结束
                     // was able to allocate out of the cache so move on
                     return;
                 }
@@ -244,6 +253,8 @@ abstract class PoolArena<T> implements PoolArenaMetric {
                     return;
                 }
             }
+
+            // 本地缓存中无法分配对应的 tiny small 内存块则去 Arena 中 寻找对应的chunk 重新 分配出对应的 subpage 在分配对应的内存
             synchronized (this) {
                 allocateNormal(buf, reqCapacity, normCapacity);
             }
@@ -251,6 +262,10 @@ abstract class PoolArena<T> implements PoolArenaMetric {
             incTinySmallAllocation(tiny);
             return;
         }
+
+
+
+
         // 如果容量 >=8192 <= 16mb
         if (normCapacity <= chunkSize) {
             if (cache.allocateNormal(this, buf, reqCapacity, normCapacity)) {
@@ -267,7 +282,7 @@ abstract class PoolArena<T> implements PoolArenaMetric {
         }
     }
 
-    // Method must be called inside synchronized(this) { ... } block
+    // Method must be called inside synchronized(this) { ... } block  之所以从 50开始 应该是为了提高 缓存命中率
     private void allocateNormal(PooledByteBuf<T> buf, int reqCapacity, int normCapacity) {
         if (q050.allocate(buf, reqCapacity, normCapacity) || q025.allocate(buf, reqCapacity, normCapacity) ||
             q000.allocate(buf, reqCapacity, normCapacity) || qInit.allocate(buf, reqCapacity, normCapacity) ||
@@ -277,6 +292,7 @@ abstract class PoolArena<T> implements PoolArenaMetric {
 
         // 如果在 所有chunklist中都没有 节点代表这次第一次创建chunk
         PoolChunk<T> c = newChunk(pageSize, maxOrder, pageShifts, chunkSize);
+        // 在新建的 chunk 中分配内存给空对象
         boolean success = c.allocate(buf, reqCapacity, normCapacity);
         assert success;
         qInit.add(c);
@@ -304,8 +320,10 @@ abstract class PoolArena<T> implements PoolArenaMetric {
             activeBytesHuge.add(-size);
             deallocationsHuge.increment();
         } else {
+            // 得到容量所属区间
             SizeClass sizeClass = sizeClass(normCapacity);
             // 默认释放到线程本地变量中 如果超出  临界值 比如 512 256 64 那么就返回fasle 回收到公有缓存中
+
             if (cache != null && cache.add(this, chunk, nioBuffer, handle, normCapacity, sizeClass)) {
                 // cached so not free it.
                 return;
@@ -327,6 +345,8 @@ abstract class PoolArena<T> implements PoolArenaMetric {
         synchronized (this) {
             // We only call this if freeChunk is not called because of the PoolThreadCache finalizer as otherwise this
             // may fail due lazy class-loading in for example tomcat.
+
+
             if (!finalizer) {
                 switch (sizeClass) {
                     case Normal:
@@ -342,6 +362,9 @@ abstract class PoolArena<T> implements PoolArenaMetric {
                         throw new Error();
                 }
             }
+
+
+
             destroyChunk = !chunk.parent.free(chunk, handle, nioBuffer);
         }
         // 如果返回
@@ -355,11 +378,11 @@ abstract class PoolArena<T> implements PoolArenaMetric {
         int tableIdx;
         PoolSubpage<T>[] table;
         if (isTiny(elemSize)) { // < 512
-            tableIdx = elemSize >>> 4;
+            tableIdx = elemSize >>> 4;// 得到对应 长度在 对应tiny[] 中的索引 /4 就可以得到
             table = tinySubpagePools;
-        } else {
+        } else {// 这儿是找到 对应长度在 small[] 中的索引
             tableIdx = 0;
-            elemSize >>>= 10;
+            elemSize >>>= 10;//10000 00000  。这个位置 之所以 右便宜10位 是因为 512 >>>  10 =0  1024 = 1 <<< 10 后续 都是2的指数幂 所以 每次后移1 ！=0 的时候 index就offset 1 .。
             while (elemSize != 0) {
                 elemSize >>>= 1;
                 tableIdx ++;
@@ -763,6 +786,9 @@ abstract class PoolArena<T> implements PoolArenaMetric {
             return directMemoryCacheAlignment - remainder;
         }
 
+        /**
+
+         */
         @Override
         protected PoolChunk<ByteBuffer> newChunk(int pageSize, int maxOrder,
                 int pageShifts, int chunkSize) {
@@ -790,7 +816,18 @@ abstract class PoolArena<T> implements PoolArenaMetric {
                     offsetCacheLine(memory));
         }
 
+        /**
+            netty 默认采用自己申请 内存 然后 用 bytebuffer 的 address 构造器创建 缓冲区 避免了
+            使用 jdk api 创建 是因为 jdk 默认的 回收策略是 创建了一个 虚引用。
+            在直接缓冲区 被gc的时候。通过 手动调用 clean 然后 调用 unsafe.freeMonety 释放内存。
+           虽然这个过程听起来没问题 首先 第一点。 在并发环境下 cleaner 的add方法 是同步的。
+           并且 还需要手动 调用 clean 方法才能真正使 内存 得到释放
+
+            所以感觉这个像形同虚设了。他并没有重写 failzz方法 调用 clean方法？
+         */
         private static ByteBuffer allocateDirect(int capacity) {
+
+
             return PlatformDependent.useDirectBufferNoCleaner() ?
                     PlatformDependent.allocateDirectNoCleaner(capacity) : ByteBuffer.allocateDirect(capacity);
         }

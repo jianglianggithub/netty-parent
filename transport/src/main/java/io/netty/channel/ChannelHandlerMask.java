@@ -93,7 +93,7 @@ final class ChannelHandlerMask {
                 mask |= MASK_ALL_INBOUND;
 
                 if (isSkippable(handlerType, "channelRegistered", ChannelHandlerContext.class)) {
-                    mask &= ~MASK_CHANNEL_REGISTERED;
+                    mask &= ~MASK_CHANNEL_REGISTERED;//.. 跳过regist 第二位一定是0
                 }
                 if (isSkippable(handlerType, "channelUnregistered", ChannelHandlerContext.class)) {
                     mask &= ~MASK_CHANNEL_UNREGISTERED;

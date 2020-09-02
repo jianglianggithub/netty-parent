@@ -390,6 +390,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
     }
 
     static void invokeChannelReadComplete(final AbstractChannelHandlerContext next) {
+        // 如果是对应Handle 对应的 线程池 那么直接执行
         EventExecutor executor = next.executor();
         if (executor.inEventLoop()) {
             next.invokeChannelReadComplete();
@@ -790,7 +791,10 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
             throw e;
         }
 
-        final AbstractChannelHandlerContext next = findContextOutbound(flush ? (MASK_WRITE | MASK_FLUSH) : MASK_WRITE);
+        //找到上一个
+        final AbstractChannelHandlerContext next =
+                findContextOutbound(flush ? (MASK_WRITE | MASK_FLUSH) : MASK_WRITE);
+
         final Object m = pipeline.touch(msg, next);
         EventExecutor executor = next.executor();
         if (executor.inEventLoop()) {
@@ -995,7 +999,7 @@ abstract class AbstractChannelHandlerContext implements ChannelHandlerContext, R
      * but not called {@link ChannelHandler#handlerAdded(ChannelHandlerContext)}.
      */
     private boolean invokeHandler() {
-        // Store in local variable to reduce volatile reads.
+        // Store in local variable to reduce volatile reads.  检测是否能执行 因为可能在执行的时候
         int handlerState = this.handlerState;
         return handlerState == ADD_COMPLETE || (!ordered && handlerState == ADD_PENDING);
     }

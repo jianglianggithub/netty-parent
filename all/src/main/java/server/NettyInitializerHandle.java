@@ -26,11 +26,13 @@ public class NettyInitializerHandle extends ChannelInitializer<NioSocketChannel>
                 .addLast(new SimpleChannelInboundHandler<TextWebSocketFrame>() {
                     @Override
                     protected void channelRead0(ChannelHandlerContext ctx, TextWebSocketFrame msg) throws Exception {
-                        ByteBuf content = msg.content();
-                        System.out.println(content.getClass());
-                        System.out.println(content.toString(Charset.defaultCharset()));
-                        TextWebSocketFrame aa= new TextWebSocketFrame("你吗四是");
-                        ctx.channel().writeAndFlush(aa);
+                        ByteBuf byteBuf = ctx.alloc().directBuffer(1024);
+                        ctx.channel().write(byteBuf);
+//                        ByteBuf content = msg.content();
+//                        System.out.println(content.getClass());
+//                        System.out.println(content.toString(Charset.defaultCharset()));
+//                        TextWebSocketFrame aa= new TextWebSocketFrame("你吗四是");
+//                        ctx.channel().writeAndFlush(aa);
                     }
                 });
 

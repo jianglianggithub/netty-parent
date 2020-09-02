@@ -128,6 +128,15 @@ public class DefaultChannelPipeline implements ChannelPipeline {
         if (group == null) {
             return null;
         }
+        /**
+         *  如果是 在 addLast 的时候 配置了对应的线程池 那么 返回的时候 确实的绑定了一个 线程 去管理这个链接
+         *  因为addQueue(task) 的时候是维护顺序的。这样保证了 write flush 的时候是 有序的
+         *
+         *  可以确定了 当pinEventExecutor 设置了 = false 的时候 才会 每次addLast 的时候 都会使用 下一个 loop
+         *  但是即使如此 每个链接 使用的loop都是固定的
+         *
+         *  如果= true 或者 null 那么 所有使用 这个 loppGroup 的链接在addLast的时候 都使用同一个 loop
+         */
         Boolean pinEventExecutor = channel.config().getOption(ChannelOption.SINGLE_EVENTEXECUTOR_PER_GROUP);
         if (pinEventExecutor != null && !pinEventExecutor) {
             return group.next();
@@ -1329,7 +1338,7 @@ public class DefaultChannelPipeline implements ChannelPipeline {
 
     final class HeadContext extends AbstractChannelHandlerContext
             implements ChannelOutboundHandler, ChannelInboundHandler {
-
+        // 每个 tial 和Heaed 都会存储 当前连接 的 Unsafe 对象 Unsafe 对象来负责真正的 读写操作
         private final Unsafe unsafe;
 
         HeadContext(DefaultChannelPipeline pipeline) {

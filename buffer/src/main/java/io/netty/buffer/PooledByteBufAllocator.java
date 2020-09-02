@@ -178,11 +178,14 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator implements 
 
     private final PoolArena<byte[]>[] heapArenas;
     private final PoolArena<ByteBuffer>[] directArenas;//Areanas 和 heapAreanas 是所有线程公用的缓存。
+
     private final int tinyCacheSize;
     private final int smallCacheSize;
     private final int normalCacheSize;
+
     private final List<PoolArenaMetric> heapArenaMetrics;
     private final List<PoolArenaMetric> directArenaMetrics;
+    // 之所以会有线程本地cache 缓存池 主要是为了避免锁竞争
     private final PoolThreadLocalCache threadCache;
     private final int chunkSize;
     private final PooledByteBufAllocatorMetric metric;
@@ -344,13 +347,18 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator implements 
         return toLeakAwareBuffer(buf);
     }
 
+    /*
+
+            大致的流程 首先获取ThreadLocalCache 和 该 cache 指向的Arena就是当前线程 所属的Arena
+            然后首先重缓存中分配 没分配到再去Arena中分配
+     */
     @Override
     protected ByteBuf newDirectBuffer(int initialCapacity, int maxCapacity) {
         PoolThreadCache cache = threadCache.get(); // 从本地缓存中拿到PoolThreadCache  存放了  线程本地 使用完butebuff 缓存起来的 缓冲区
         PoolArena<ByteBuffer> directArena = cache.directArena;
 
         final ByteBuf buf;
-        // 上面创建的一个空对象下面才开始 进行init
+
         if (directArena != null) {
             buf = directArena.allocate(cache, initialCapacity, maxCapacity);
         } else {
@@ -466,8 +474,7 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator implements 
         @Override
         protected synchronized PoolThreadCache initialValue() {
 
-            // 每个线程 NioEventLoop对应的线程 会在 PooledByteBufAllocator.defualt 中的directArenas 或者HeapS 中选取一个 内存池出来
-            // 与之对应 绑定 放在 FastThreadLocal中
+            // 每个线程 在公有的 PoolArena[] 中分配一个Arena出来。
             final PoolArena<byte[]> heapArena = leastUsedArena(heapArenas);
             final PoolArena<ByteBuffer> directArena = leastUsedArena(directArenas);
 
@@ -498,10 +505,15 @@ public class PooledByteBufAllocator extends AbstractByteBufAllocator implements 
             threadCache.free(false);
         }
 
+        /*
+        选取出一个 在Arena中 线程选择占比最小的Arena 防止 同步锁阻塞 让线程分配内存时的等待 所以Arena的个数最好和 Thread个数要大于。
+
+        *  */
         private <T> PoolArena<T> leastUsedArena(PoolArena<T>[] arenas) {
             if (arenas == null || arenas.length == 0) {
                 return null;
             }
+
 
             PoolArena<T> minArena = arenas[0];
             for (int i = 1; i < arenas.length; i++) {

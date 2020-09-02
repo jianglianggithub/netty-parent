@@ -417,7 +417,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
      * {@link Unsafe} implementation which sub-classes must extend and use.
      */
     protected abstract class AbstractUnsafe implements Unsafe {
-
+        // outboundBuffer 负责接收 channel中 write 的byteBuff 缓存在单向链表中
         private volatile ChannelOutboundBuffer outboundBuffer = new ChannelOutboundBuffer(AbstractChannel.this);
         private RecvByteBufAllocator.Handle recvHandle;
         private boolean inFlush0;
@@ -889,9 +889,9 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
             }
 
             int size;
-            try {
+            try {// 对msg做一个初步检测 并且 如果不是堆外内存转成堆外内存 UnPooled 转为 pooled 前提是有 directUnsafeAlox
                 msg = filterOutboundMessage(msg);
-                size = pipeline.estimatorHandle().size(msg);
+                size = pipeline.estimatorHandle().size(msg);// 得到可读的字节长度
                 if (size < 0) {
                     size = 0;
                 }
@@ -933,7 +933,7 @@ public abstract class AbstractChannel extends DefaultAttributeMap implements Cha
 
             inFlush0 = true;
 
-            // Mark all pending write requests as failure if the channel is inactive.
+            // 如果 通道关闭
             if (!isActive()) {
                 try {
                     if (isOpen()) {

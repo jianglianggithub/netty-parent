@@ -3,6 +3,7 @@ package server;
 import io.netty.bootstrap.Bootstrap;
 import io.netty.bootstrap.ServerBootstrap;
 import io.netty.buffer.ByteBuf;
+
 import io.netty.buffer.PooledByteBufAllocator;
 import io.netty.buffer.Unpooled;
 import io.netty.channel.*;
@@ -18,8 +19,10 @@ import io.netty.handler.logging.LoggingHandler;
 import io.netty.util.Attribute;
 import io.netty.util.AttributeKey;
 
+import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.channels.Selector;
+import java.nio.channels.WritableByteChannel;
 import java.nio.channels.spi.SelectorProvider;
 
 /**
@@ -66,13 +69,24 @@ import java.nio.channels.spi.SelectorProvider;
  *      ByteTomessage 和 MessageToMessage 的最大区别 就是 后者可以指定 编解码消息的 类型 前者 默认是  object
  *
  *    在netty中 只有 非池化  非直接缓冲区的 才能 用array() 方法
+ *
+ *
+ *
+ *    在netty中大量使用的 Atomic 助手类 而不是直接new 的方式 我猜想是因为
+ *    如果直接使用atmoic 类 那么 要new 然后  最后还是调用的  助手类 通过unsafe 操作
+ *    直接直接定义一个 static类那么 同样是改变 feild 但是只用实例化一次
  *    */
 
 public class Server {
 
     public static void main(String[] args) throws Exception {
-
-        PooledByteBufAllocator.DEFAULT.buffer();
+        ByteBuf buffer = PooledByteBufAllocator.DEFAULT.buffer(498);
+        byte[] bytes = new byte[1024];
+        buffer.writeBytes((byte[]) null);
+        buffer.readBytes(bytes);
+        buffer.release();
+        buffer.retain();
+        System.out.println(buffer.refCnt());
 
         final NioEventLoopGroup bos = new NioEventLoopGroup(1);
         final NioEventLoopGroup woker = new NioEventLoopGroup();
@@ -85,11 +99,86 @@ public class Server {
                 .childHandler(new ChannelInitializer<SocketChannel>() {
                     @Override
                     protected void initChannel(SocketChannel ch) throws Exception {
-                        ch.pipeline().addLast(new NettyInitializerHandle());
+                        ch.pipeline().addLast(new StringDecoder());
+                        ch.pipeline().addLast(new ChannelInboundHandlerAdapter(){
+                            @Override
+                            public void channelRead(ChannelHandlerContext ctx, Object msg) throws Exception {
+                                ByteBuf buffer = ctx.alloc().buffer(1924);
+                                buffer.writeBytes("aaa".getBytes());
+
+                                ctx.channel().writeAndFlush(null);
+                                ChannelFuture write = ctx.channel().write(buffer);
+                                write.cancel(true);
+                                ctx.channel().write(new FileRegion() {
+                                    @Override
+                                    public long position() {
+                                        return 0;
+                                    }
+
+                                    @Override
+                                    public long transfered() {
+                                        return 0;
+                                    }
+
+                                    @Override
+                                    public long transferred() {
+                                        return 0;
+                                    }
+
+                                    @Override
+                                    public long count() {
+                                        return 0;
+                                    }
+
+                                    @Override
+                                    public long transferTo(WritableByteChannel target, long position) throws IOException {
+                                        return 0;
+                                    }
+
+                                    @Override
+                                    public FileRegion retain() {
+                                        return null;
+                                    }
+
+                                    @Override
+                                    public FileRegion retain(int increment) {
+                                        return null;
+                                    }
+
+                                    @Override
+                                    public FileRegion touch() {
+                                        return null;
+                                    }
+
+                                    @Override
+                                    public FileRegion touch(Object hint) {
+                                        return this;
+                                    }
+
+                                    @Override
+                                    public int refCnt() {
+                                        return 0;
+                                    }
+
+                                    @Override
+                                    public boolean release() {
+                                        return false;
+                                    }
+
+                                    @Override
+                                    public boolean release(int decrement) {
+                                        return false;
+                                    }
+                                });
+                                ctx.channel().write(ctx.alloc().buffer(1204).writeBytes("aa".getBytes()));
+                                ctx.channel().flush();
+
+                            }
+                        });
                     }
                 });
         ChannelFuture channelFuture = serverBootstrap.bind(2333);
-        channelFuture.sync();
+        channelFuture.channel().closeFuture().sync();
 
 
 

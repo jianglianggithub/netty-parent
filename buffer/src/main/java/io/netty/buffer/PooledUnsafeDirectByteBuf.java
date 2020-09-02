@@ -31,10 +31,10 @@ final class PooledUnsafeDirectByteBuf extends PooledByteBuf<ByteBuffer> {
             return new PooledUnsafeDirectByteBuf(handle, 0);
         }
     };
-
+    // 在对象池 中 获取一个对象。 但是 只是一个壳子 可以说 netty下得byteBuffer 其实都是一个 躯壳。最终调用得都是 NIO 得 bytebuffer
     static PooledUnsafeDirectByteBuf newInstance(int maxCapacity) {
         PooledUnsafeDirectByteBuf buf = RECYCLER.get();
-        buf.reuse(maxCapacity);
+        buf.reuse(maxCapacity);// 将buffer 初始化
         return buf;
     }
 
@@ -47,8 +47,9 @@ final class PooledUnsafeDirectByteBuf extends PooledByteBuf<ByteBuffer> {
     @Override
     void init(PoolChunk<ByteBuffer> chunk, ByteBuffer nioBuffer,
               long handle, int offset, int length, int maxLength, PoolThreadCache cache) {
+        // 纪录 当前 内存快 所属的 chunk  offset 在 chunk 16mb中的offset   当回收时 对应的 ThreadLocalCache
         super.init(chunk, nioBuffer, handle, offset, length, maxLength, cache);
-        initMemoryAddress();
+        initMemoryAddress();// 初始化 对应缓冲区 在 bytebuffer 中的地址 通过unsafe 指针快速 get
     }
 
     @Override

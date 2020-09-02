@@ -27,6 +27,11 @@ import static java.lang.Math.*;
 
 import java.nio.ByteBuffer;
 
+/**
+ *   每一个 chunkList  中 PoolChunk 都是可用的chunk  而  Arena 中 缓存的对应的数组 中第一个Node 都是 示例节点 是不可用的
+ *
+ * @param <T>
+ */
 final class PoolChunkList<T> implements PoolChunkListMetric {
     private static final Iterator<PoolChunkMetric> EMPTY_METRICS = Collections.<PoolChunkMetric>emptyList().iterator();
     private final PoolArena<T> arena;
@@ -97,12 +102,14 @@ final class PoolChunkList<T> implements PoolChunkListMetric {
     }
 
     boolean free(PoolChunk<T> chunk, long handle, ByteBuffer nioBuffer) {
+        //释放对应的 subpage 或者 > 8192 size 的cache
         chunk.free(handle, nioBuffer);
         // 当使用率小于 当前chunkList 的最小容量后 不满足待在该 list的条件了那么 放到 preList 地柜找到满足的为止
         // 这儿如果是 init 节点 那么 放在init中的chunk是不会被回收的 因为initList 的minusage =  -Integer.maxint  所以不可能usage<这个数
         if (chunk.usage() < minUsage) {
             remove(chunk);
             // Move the PoolChunk down the PoolChunkList linked-list.
+            // 如果是 头节点 直接返回 false 回收掉
             return move0(chunk);
         }
         return true;

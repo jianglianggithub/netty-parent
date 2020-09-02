@@ -213,6 +213,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
      */
     protected final int doWrite0(ChannelOutboundBuffer in) throws Exception {
         Object msg = in.current();
+        // 如果 0 是 flush链表中本身就没有nextNode 的情况
         if (msg == null) {
             // Directly return here so incompleteWrite(...) is not called.
             return 0;
@@ -223,21 +224,29 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
     private int doWriteInternal(ChannelOutboundBuffer in, Object msg) throws Exception {
         if (msg instanceof ByteBuf) {
             ByteBuf buf = (ByteBuf) msg;
+
+            // 无可读
             if (!buf.isReadable()) {
                 in.remove();
                 return 0;
             }
-
+            // 将字节写入 javaSocket中 返回写入的字节长度
             final int localFlushedAmount = doWriteBytes(buf);
             if (localFlushedAmount > 0) {
+                // 如果是特殊的 promise 那么在 write 到
                 in.progress(localFlushedAmount);
                 if (!buf.isReadable()) {
                     in.remove();
                 }
                 return 1;
             }
+
+
+
+            // sendFile 支持
         } else if (msg instanceof FileRegion) {
             FileRegion region = (FileRegion) msg;
+            // transferred = 已经写的长度 代表写完 直接删除
             if (region.transferred() >= region.count()) {
                 in.remove();
                 return 0;
@@ -246,6 +255,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             long localFlushedAmount = doWriteFileRegion(region);
             if (localFlushedAmount > 0) {
                 in.progress(localFlushedAmount);
+                // 同上 。 但是在这儿同上有所不同。 在rocketmq 中利用这点。 让netty 反复 do where 由于
                 if (region.transferred() >= region.count()) {
                     in.remove();
                 }
@@ -262,6 +272,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
     protected void doWrite(ChannelOutboundBuffer in) throws Exception {
         int writeSpinCount = config().getWriteSpinCount();
         do {
+            //head 节点的msg
             Object msg = in.current();
             if (msg == null) {
                 // Wrote all messages.
@@ -274,7 +285,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
 
         incompleteWrite(writeSpinCount < 0);
     }
-
+    // 不是 堆外 内存块 也转移到堆外  所以创建的时候最好直接就是堆外
     @Override
     protected final Object filterOutboundMessage(Object msg) {
         if (msg instanceof ByteBuf) {
@@ -339,6 +350,7 @@ public abstract class AbstractNioByteChannel extends AbstractNioChannel {
             return;
         }
         final int interestOps = key.interestOps();
+        // 如果没监听写事件 那么 监听 然后在 NioEventLoop 中 可以 做write事件回调处理
         if ((interestOps & SelectionKey.OP_WRITE) == 0) {
             key.interestOps(interestOps | SelectionKey.OP_WRITE);
         }

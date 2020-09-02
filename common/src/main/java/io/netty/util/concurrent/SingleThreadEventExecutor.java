@@ -900,7 +900,7 @@ public abstract class SingleThreadEventExecutor extends AbstractScheduledEventEx
         // 加入到 task 任务队列中 jtc中得 无锁队列
         addTask(task);
         /**
-         *   如果不会当前EventLoop 的线程 那么启动 这个线程。。其实这个和juc 的线程池 有一分相似之处。
+         *   如果不是当前EventLoop 的线程 那么启动 这个线程。。其实这个和juc 的线程池 有一分相似之处。
          *   只不过 juc 的线程池 多个worker 共享一个 queue 而 netty中的线程池 没一个 loop 都是抽象城了一个当线程 线程池 每个loop
          *   都有自己的 阻塞队列
          */

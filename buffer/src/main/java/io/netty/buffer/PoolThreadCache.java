@@ -45,11 +45,20 @@ import java.util.concurrent.atomic.AtomicBoolean;
  *
  *  在每一个 reactor 线程 都会有一个本地缓存 的byteBuff
  *  那么 这里面和 公有的 PoolAxxx 是有一定的不同的。
- *  但是 也分为 tiny  small  normal  分别 存储 16- 496   512b-4k   8k-32k   数组长度分别是   32 【1-31】，4 ，3 如果申请的缓冲区大小不匹配那么就去公共的缓冲区中获取
- *   每个数组中的MemoryCache对应的节点中的链表长度最大为512 ，256，64 也就是 比如 tiny数组中的 每个 容量对应的节点中 的 bytebuff 链表最大为xx
+ *  但是 也分为
+ *          这里注意下 tiny的数组 其实第一个 0 是没有的 第一个 才是16 第32是 496  所以 0 - 31  只有 1-31 是真实纯在的 因为 容量/16 就直接拿到index了
+ *              tiny     small    normal
+ *            16- 496   512b-4k   8k-16mb
+ *  数组长度     32        4          3
+ *      如果申请的缓冲区大小不匹配那么就去公共的缓冲区中获取
+ *   每个数组中的MemoryCache对应的节点中的链表长度最大为512    256，       64       也就是 比如 tiny数组中的 每个 容量对应的节点中 的 bytebuff 链表最大为xx
  *   这个方式和  subPage差不多 也是 16-496,512-4k，然后超过的直接取 chunk中的page
  *
  *   在 tany中每个节点 最大长度为512   small 256   noram为64 最大缓冲区大小为32*1024 byte 大于直接回收到 arana中
+ *
+ *
+ *   本地缓存中使用的 结构跟 Arena 有一点不同就是 Arena 的 数组中 head节点 是一个空节点。
+ *   而 LocalCache 中 每个容量区间节点 对应得 缓存靠得是 一个 队列得 wrapper 对象。包装对象
  *
  */
 final class PoolThreadCache {
@@ -58,6 +67,11 @@ final class PoolThreadCache {
 
     final PoolArena<byte[]> heapArena;
     final PoolArena<ByteBuffer> directArena;
+
+    /**
+     *   tiny small  normal 都会创建一个头节点 是一个空节点。 在线程本地变量 中得缓存 缓冲区 数量是有限得。 默认分别缓存得数量为
+     *   512   256    64    分别代表 每个数组中得 对应容量大小得区间节点 链表得最大长度
+     */
 
     // Hold the caches for the different size classes, which are tiny, small and normal.
     private final MemoryRegionCache<byte[]>[] tinySubPageHeapCaches;
@@ -88,6 +102,7 @@ final class PoolThreadCache {
         this.heapArena = heapArena;
         this.directArena = directArena;
         if (directArena != null) {
+            // tinyCacheSize smallCacheSize normalCacheSize 决定了线程缓存得 对应区间 queue中缓存得个数
             tinySubPageDirectCaches = createSubPageCaches(tinyCacheSize, PoolArena.numTinySubpagePools, SizeClass.Tiny);// 32
             smallSubPageDirectCaches = createSubPageCaches(smallCacheSize, directArena.numSmallSubpagePools, SizeClass.Small); // 4
 
@@ -143,6 +158,19 @@ final class PoolThreadCache {
         }
     }
 
+    public static void main(String[] args) {
+
+        int[] bytes = new int[32];
+        for (int i = 0,x = 16; i < bytes.length; i++,x += 16) {
+            bytes[i] = x;
+        }
+
+        for (int aByte : bytes) {
+            System.out.println(aByte);
+        }
+        System.out.println(bytes.length);
+    }
+
     private static <T> MemoryRegionCache<T>[] createNormalCaches(
             int cacheSize, int maxCachedBufferCapacity, PoolArena<T> area) {
         if (cacheSize > 0 && maxCachedBufferCapacity > 0) {
@@ -189,14 +217,14 @@ final class PoolThreadCache {
     boolean allocateNormal(PoolArena<?> area, PooledByteBuf<?> buf, int reqCapacity, int normCapacity) {
         return allocate(cacheForNormal(area, normCapacity), buf, reqCapacity);
     }
-
+    // 根据对应的容量 在对应容量对应的Node Cache 分配
     @SuppressWarnings({ "unchecked", "rawtypes" })
     private boolean allocate(MemoryRegionCache<?> cache, PooledByteBuf buf, int reqCapacity) {
         if (cache == null) {
             // no cache found so just return false here
             return false;
         }
-        //从本地缓存中  取到对应的 节点 如果不为空
+
         boolean allocated = cache.allocate(buf, reqCapacity);
         if (++ allocations >= freeSweepAllocationThreshold) {
             allocations = 0;
@@ -315,8 +343,9 @@ final class PoolThreadCache {
         cache.trim();
     }
 
+
     private MemoryRegionCache<?> cacheForTiny(PoolArena<?> area, int normCapacity) {
-        int idx = PoolArena.tinyIdx(normCapacity);
+        int idx = PoolArena.tinyIdx(normCapacity);// 用对应的容量 / 16 得到对应的索引
         if (area.isDirect()) {
             return cache(tinySubPageDirectCaches, idx);
         }
@@ -385,7 +414,7 @@ final class PoolThreadCache {
 
         MemoryRegionCache(int size, SizeClass sizeClass) {
             this.size = MathUtil.safeFindNextPositivePowerOfTwo(size);
-            queue = PlatformDependent.newFixedMpscQueue(this.size);
+            queue = PlatformDependent.newFixedMpscQueue(this.size);//超过则 push失败 回收到Arena中
             this.sizeClass = sizeClass;
         }
 

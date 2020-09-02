@@ -120,14 +120,14 @@ final class PoolChunk<T> implements PoolChunkMetric {
 
     //  每个 叶子节点  的大小为  8k = 8192 byte  当需要分配的缓冲区 的 容量 <  这个值的 时候 就会把 对应的 pageNode 分成 一个subPages
     // 而 subpages 也是分为tiny  samll   前者 放的是 16  496 byte 大小的 node,后者 放的是 512 - 4096 byte  大小的node
-    private final PoolSubpage<T>[] subpages;
+    private final PoolSubpage<T>[] subpages;// 存放所有 页子节点 2048个
     /** Used to determine if the requested capacity is equal to or greater than pageSize. */
     private final int subpageOverflowMask;
     private final int pageSize;
     private final int pageShifts;
     private final int maxOrder;
     private final int chunkSize;
-    private final int log2ChunkSize;
+    private final int log2ChunkSize;//chunksize = 1 << log2ChunkSize
     private final int maxSubpageAllocs;
     /** Used to mark memory as unusable */
     private final byte unusable;
@@ -166,7 +166,7 @@ final class PoolChunk<T> implements PoolChunkMetric {
         freeBytes = chunkSize; // 可分配的字节数 剩余容量
 
         assert maxOrder < 30 : "maxOrder should be < 30, but is: " + maxOrder;
-        maxSubpageAllocs = 1 << maxOrder;// 4096 个节点  用来表示2048个叶子节点 所用到的 数组长度
+        maxSubpageAllocs = 1 << maxOrder;// 2048 个节点  用来表示2048个叶子节点 所用到的 数组长度
 
         // Generate the memory map.
         memoryMap = new byte[maxSubpageAllocs << 1];
@@ -234,12 +234,16 @@ final class PoolChunk<T> implements PoolChunkMetric {
 
     boolean allocate(PooledByteBuf<T> buf, int reqCapacity, int normCapacity) {
         final long handle;
-        if ((normCapacity & subpageOverflowMask) != 0) { // >= pageSize
+        // >= pageSize  normal 这个地方是一个算法 相当于 8192 = n个11  -8192 = 高位1 n个1 前面是1 n个1位置上是0
+        if ((normCapacity & subpageOverflowMask) != 0) {
             handle =  allocateRun(normCapacity);
-        } else {
+        } else {// 如果是subPage < 8192 的
             handle = allocateSubpage(normCapacity);
         }
-
+        //  -1 代表分配失败
+        // 如果 当前容量大小 大于 subPage 那么返回的是 当前 分配的 缓冲区在 chunk 中的 idx
+        // 如果小于 subpage 那么 返回的handle 其实是 返回的 当前容量 位于 chunk中的第几个 subpage【idx】
+        // 和 当前 创建的缓冲区位于第几个 缓存快
         if (handle < 0) {
             return false;
         }
@@ -259,6 +263,9 @@ final class PoolChunk<T> implements PoolChunkMetric {
     private void updateParentsAlloc(int id) {
         while (id > 1) {
             int parentId = id >>> 1;
+            /**
+             *  如果当前是 右节点那么获取左节点 反之 获得对应的value 将最小值设置为 parentID 的value
+             */
             byte val1 = value(id);
             byte val2 = value(id ^ 1);
             byte val = val1 < val2 ? val1 : val2;
@@ -267,6 +274,9 @@ final class PoolChunk<T> implements PoolChunkMetric {
         }
     }
 
+    public static void main(String[] args) {
+        System.out.println(3 ^ 1);
+    }
     /**
      * Update method used by free
      * This needs to handle the special case when both children are completely free
@@ -301,27 +311,64 @@ final class PoolChunk<T> implements PoolChunkMetric {
      * @return index in memoryMap
      */
     private int allocateNode(int d) {
+
+        /*
+            第一个node 的 val 能代表 当前chunk 对应的 完全二叉树中 第一个能被【完整分配】 node 所在的层数
+         */
+
+
         int id = 1;
-        int initial = - (1 << d); // has last d bits = 0 and rest all = 1
-        byte val = value(id);
-        if (val > d) { // unusable
+        int initial = - (1 << d); // 得到对应 h 的 all nodes count 那么 id < math.abs(initial) = true
+        byte val = value(id);// val = 最近的可用层
+        if (val > d) { // val = “距离当前节点最近层的“ 有可用节点的 h   如果 要分配的  d 也就是 h 比 val < 那么可以直接得出
+                        // 不满足条件了  因为在这层 之上 都不可能有完整的 一个节点及其子节点 都是 bitmap[id] = dept[id] 了
             return -1;
         }
+
+
+        /*
+            如果 val < d  代表 还没有 找到对应 d 所在层的node 的id  当相等的时候 代表 已经找到了 对应 层可用node 的id
+            因为一个node 如果 可用的话 那么 一定是 当前node 所在的高度= bitmap[id] 的
+            如果不满足那么这个node 一定不能完全被分配
+
+            如果相等 代表 当前节点 所在的 h 是需要分配 容量所需要的h 也就是【d】
+
+            这里会有多种情况
+                就是 对应node 没有被使用 但是呢 对应 node 的value 不是要分配的 d 对应的 h
+
+                在就是 node 被使用了 而且 对应 node val > d  这种情况不可能出现。。至于为什么 想想就知道了
+
+                如果 相等的情况下 id < 对应层数的节点总数 代表 没到对应真正的层 因为
+                可额 这个节点的子节点被使用了 那么这个节点的val = d 了 但是并没有到 真正的层数
+
+                这个里面有一个简单的算法就是  1 << h  其实 等于 当前层的个数 也等于 当前层的 startIndex 所以 小于这个index 自然不是这个层的
+
+         */
         while (val < d || (id & initial) == 0) { // id & initial == 1 << d for all ids at depth d, for < d it is 0
-            id <<= 1;
+            id <<= 1;//拿到 左1 子节点值
             val = value(id);
+
+            /*
+                如果 对应 id node 的左节点 val > d  代表 这个节点 已经 被使用过了 无法 在完整被分配了 那么获得 右节点的id
+                拿到右节点的 val  那么 下一个循环 就可以判断 val == d ？ 如果相等 代表 找到了 需要的 h 对应的层 的 node
+             */
             if (val > d) {
                 id ^= 1;
                 val = value(id);
             }
         }
+        // 得到可用的节点了
         byte value = value(id);
         assert value == d && (id & initial) == 1 << d : String.format("val = %d, id & initial = %d, d = %d",
                 value, id & initial, d);
+
+        // 将 bitMap[id] 设置为不可用  并且parentId 递归设置成 最近的可用节点 高度
         setValue(id, unusable); // mark as unusable
         updateParentsAlloc(id);
         return id;
     }
+
+
 
     /**
      * Allocate a run of pages (>=1)
@@ -331,16 +378,24 @@ final class PoolChunk<T> implements PoolChunkMetric {
      */
     private long allocateRun(int normCapacity) {
         // 如果  需要分配的 缓冲区大小 》= 8192 bytes
-        // 通过算法 得出 分配当前缓冲区大小 对应节点的高度  ，
-        int d = maxOrder - (log2(normCapacity) - pageShifts);
-        int id = allocateNode(d);// 通过高度 得到 对应节点 moenyMap 中的index
+        // 计算出 对应容量在 树的高度
+        int i = log2(normCapacity);
+
+        /**
+         *  这个算法思路是 叶子节点 容量 是 2的多少次方  然后用 对应容量计算出是2的多少次方 设想 如果我每比你大 1 那么 不就是 需要分配的容量 = 你的几倍么？
+         *   那么 叶子节点的 父节点= pagesize *2 以此类推 那么 i - pageShifts = 多出来的倍数 每多一倍树的高度就减少1就可求出对应容量在树的高度了
+         *
+         *    数学计算公式就是   x1  x2 是2的指数倍的情况下（假设 x1=8192 x2 > x1）  那么就是 x1= 2^n 次方 x2 = 2^(n+y)
+         *    那么 x1 与 x2 差值 = 2^(n+y-n) 那么 (i - pageShifts) = y y >0代表 x2是x1 的 2^y 呗
+         */
+        int d = maxOrder - (i - pageShifts);// 1 << pageShifts = pageSize
+        int id = allocateNode(d);// 找到对应高度 可用的节点
         if (id < 0) {
             return id;
         }
         freeBytes -= runLength(id);// 通过id 计算出 使用的  chunk中的长度大小  id 越小使用的  字节就越多  比11高1层就是 8192*2  继续高就继续*2 累乘
         return id;
     }
-
     /**
      * Create / initialize a new PoolSubpage of normCapacity
      * Any PoolSubpage created / initialized here is added to subpage pool in the PoolArena that owns this PoolChunk
@@ -349,11 +404,16 @@ final class PoolChunk<T> implements PoolChunkMetric {
      * @return index in memoryMap
      */
     private long allocateSubpage(int normCapacity) {
-        // Obtain the head of the PoolSubPage pool that is owned by the PoolArena and synchronize on it.
-        // This is need as we may add it back and so alter the linked-list structure.
+        /**
+         *   如果分配的是subPage 那么找到 对应分配的容量 在 tiny[] 或者small[] 中的head节点
+         *   然后将 chunk 对应的 page 分成对应 node 容量区间大小的 subpage 追加到链表之中
+         *
+         *   每个 arena 会分配对应初始化的 headNode 在这儿就做出了体现 反之 null指针Excption
+         */
         PoolSubpage<T> head = arena.findSubpagePoolHead(normCapacity);
-        int d = maxOrder; // subpages are only be allocated from pages i.e., leaves
+        int d = maxOrder;
         synchronized (head) {
+            // 在chunk中拿到一个 可用的 8192 的 page 页节点 也就是 高度= 11那层 并且设置为占用状态
             int id = allocateNode(d);
             if (id < 0) {
                 return id;
@@ -364,14 +424,22 @@ final class PoolChunk<T> implements PoolChunkMetric {
 
             freeBytes -= pageSize;
 
-            int subpageIdx = subpageIdx(id);
+            /* 得到对应 页子节点 的 subpage index 然后找到对应 于 2048 个 node 第几个 然后 在subpages中 初始化并分配 */
+
+            int subpageIdx = subpageIdx(id);//  %  计算 拿到的 index 对应在 最后一层 的offset
             PoolSubpage<T> subpage = subpages[subpageIdx];
             if (subpage == null) {
                 subpage = new PoolSubpage<T>(head, this, id, runOffset(id), pageSize, normCapacity);
-                subpages[subpageIdx] = subpage;
+                subpages[subpageIdx] = subpage;// 一个chunk 有 2048个 subpage 将占用了的subpage初始化到chunk下所有的subpage 对应index中
             } else {
+                // 。这儿 我知道了。 释放的时候不会 将对应idx = null 掉。而是缓存 这儿将对应复用的subpage 从新初始化
                 subpage.init(head, normCapacity);
             }
+
+            /*
+            *   在对应的subpage 中分配对应的内存块 标记为使用 如果没有可用的 item count 了 那么将自己从 链表中删除
+            *   如果分配到 将可用item --
+            * */
             return subpage.allocate();
         }
     }
@@ -385,29 +453,33 @@ final class PoolChunk<T> implements PoolChunkMetric {
      * @param handle handle to free
      */
     void free(long handle, ByteBuffer nioBuffer) {
-        // 通过handle 得到使用 的page 在chunk中的 index
+        // 通过handle 得到使用 的subpage 在chunk中的 idx
         int memoryMapIdx = memoryMapIdx(handle);
-        // 通过handle 得到一个值 如果使用的是subpage 那么返回的值 是！=0的 最高位=1 低位的值代表了 在subpage中的 小分区的偏移量 第一个坑就是0 后续加加
+        // 使用的是subpage第几快内存
         int bitmapIdx = bitmapIdx(handle);
 
-        if (bitmapIdx != 0) { // ！=0 代表使用了 subpage 那么就将该 碎片回收【如果subpage 中使用的个数=0的情况才回收】
+        if (bitmapIdx != 0) { // 条件成立 代表使用了 subpage 因为 > 8192 返回的是 idx >>> 32 后肯定是  = 0 的
             PoolSubpage<T> subpage = subpages[subpageIdx(memoryMapIdx)];
             assert subpage != null && subpage.doNotDestroy;
 
             // Obtain the head of the PoolSubPage pool that is owned by the PoolArena and synchronize on it.
             // This is need as we may add it back and so alter the linked-list structure.
             PoolSubpage<T> head = arena.findSubpagePoolHead(subpage.elemSize);
+            // 重入锁。之前已经拿到了Arena的lock
             synchronized (head) {
                 // 如果返回flase 代表该subpage 的容量 使用率=0 那么将其回收  下面就是 回收对应的容量 将chunk的menoryMap deptMap进行++
                 if (subpage.free(head, bitmapIdx & 0x3FFFFFFF)) {
-                    return;
+                    return;                     // bitmapIdx & 0x3FFFFFFF 直接拿到 当前内存快是 subpage中的第几个
                 }
             }
         }
+        //回收对应内存快到chunk
+
         freeBytes += runLength(memoryMapIdx);
         setValue(memoryMapIdx, depth(memoryMapIdx));
         updateParentsFree(memoryMapIdx);
 
+        // 缓存相关。
         if (nioBuffer != null && cachedNioBuffers != null &&
                 cachedNioBuffers.size() < PooledByteBufAllocator.DEFAULT_MAX_CACHED_BYTEBUFFERS_PER_CHUNK) {
             cachedNioBuffers.offer(nioBuffer);
@@ -415,15 +487,22 @@ final class PoolChunk<T> implements PoolChunkMetric {
     }
 
     void initBuf(PooledByteBuf<T> buf, ByteBuffer nioBuffer, long handle, int reqCapacity) {
-        // 计算得出 使用的对应的 节点所处在memoryMap中的index
+        // 得到当前容量subpage节点所处在bitmap中的idx
         int memoryMapIdx = memoryMapIdx(handle);
 
         //  如果 当前 使用的缓冲区大小 >= 8192 页的大小 那么 就不存在 bitmap【bitmap index 代表了 当前subPage 位于 对应的分区大小 的 page的offset偏移量 因为index* elesize就可以得到偏移量】
+
+        /*
+             >>> 32 得到 处于 subpage 中的 第几个。 如果 = 0 那么就是 >= subpage 的。否则就是 < subpage 容量的缓冲区
+
+         */
         int bitmapIdx = bitmapIdx(handle);
+        // 如果是非 subpage 那么
         if (bitmapIdx == 0) {
             // subpage
             byte val = value(memoryMapIdx);
             assert val == unusable : String.valueOf(val);
+            // 一样的、计算offset
             buf.init(this, nioBuffer, handle, runOffset(memoryMapIdx) + offset,
                     reqCapacity, runLength(memoryMapIdx), arena.parent.threadCache());
         } else {
@@ -440,8 +519,7 @@ final class PoolChunk<T> implements PoolChunkMetric {
                                     long handle, int bitmapIdx, int reqCapacity) {
         assert bitmapIdx != 0;
 
-        // 通过handle 得到 使用的subPage 对应的page 在 chunk中对应page的index
-        // 然后通过 对应page在 memoryMap中的索引-2048 得到 在subpages中的偏移量
+        // 得到对应handle 的 在chunk中的 subpage idx 然后 %
         int memoryMapIdx = memoryMapIdx(handle);
         PoolSubpage<T> subpage = subpages[subpageIdx(memoryMapIdx)];
 
@@ -450,9 +528,13 @@ final class PoolChunk<T> implements PoolChunkMetric {
 
         buf.init(
             this, nioBuffer, handle,
-            // 通过 使用的page的偏移量 + subpage 中的位于第几个 小内存块的偏移量 就可以得出在 byteBuffer中的 position了
+            // bitmapIdx 第31 位=1  0x3FFFFFFF 011111111 这样除掉 handle 最高位的1
+                // runOffset(memoryMapIdx) 得到 suapge对应在chunk中的offset
+                // (bitmapIdx & 0x3FFFFFFF) * subpage.elemSize + offset 得到 当前 分配subpage 中 的第几个内存块 * 每个subpage 中小 碎片的size
+                // 得到了 subpage中的 offset  那么 就得出了 在chunk中全局的offset
             runOffset(memoryMapIdx) + (bitmapIdx & 0x3FFFFFFF) * subpage.elemSize + offset,
-                reqCapacity, subpage.elemSize, arena.parent.threadCache());
+                reqCapacity, subpage.elemSize, arena.parent.threadCache()
+        );
     }
 
     private byte value(int id) {
@@ -472,17 +554,26 @@ final class PoolChunk<T> implements PoolChunkMetric {
         return INTEGER_SIZE_MINUS_ONE - Integer.numberOfLeadingZeros(val);
     }
 
+    /**
+     *  得到 对应 id 对应 高度 对应 node 层的 支持的 最大 内存快的长度
+     *  depth = d， 2^d nodes， nodeSize = chunkSize/(2^d)    ps: 要记住一件事情 h itemsize = 把整个chunk 平均分配 到item的长度
+     *   这个就是这个公式的缩写。。  2 ^ log2ChunkSize / 2 ^ d  =  2^(n-d) 么？ 佛了。数学全忘了
+     * @param id
+     * @return
+     */
     private int runLength(int id) {
         // represents the size in #bytes supported by node 'id' in the tree
         return 1 << log2ChunkSize - depth(id);
     }
 
+    /* 得到对应id 在对应层的 容量 offset  = index * itemSize */
     private int runOffset(int id) {
         // represents the 0-based offset in #bytes from start of the byte-array chunk
-        int shift = id ^ 1 << depth(id);
+
+        int shift = id ^ 1 << depth(id);// 1  << dept(id) = 当前层的 items count  这个 shift 值 = 当前 node 在 对应层中的 offset
         return shift * runLength(id);
     }
-
+    // = %
     private int subpageIdx(int memoryMapIdx) {
         return memoryMapIdx ^ maxSubpageAllocs; // remove highest set bit, to get offset
     }

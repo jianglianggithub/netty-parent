@@ -46,7 +46,7 @@ public class Client {
                     }
                 });
 
-         ChannelFuture localhost = serverBootstrap.connect(new InetSocketAddress("localhost", 2222)).sync();
+         ChannelFuture localhost = serverBootstrap.connect(new InetSocketAddress("localhost", 2333)).sync();
 
 
         //  获取 对应得通道  由异步得等待 对方退出变为 同步等待

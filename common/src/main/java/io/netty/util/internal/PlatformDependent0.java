@@ -453,6 +453,11 @@ final class PlatformDependent0 {
         return newDirectBuffer(UNSAFE.allocateMemory(Math.max(1, capacity)), capacity);
     }
 
+    public static void main(String[] args) {
+        long l = UNSAFE.allocateMemory(Math.max(1, 1024));
+        System.out.println(l);
+    }
+
     static boolean hasAllocateArrayMethod() {
         return ALLOCATE_ARRAY_METHOD != null;
     }

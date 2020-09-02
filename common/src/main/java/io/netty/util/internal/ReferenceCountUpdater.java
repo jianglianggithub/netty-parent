@@ -24,6 +24,9 @@ import io.netty.util.ReferenceCounted;
 
 /**
  * Common logic for {@link ReferenceCounted} implementations
+ *
+ * rawCnt != 2 && rawCnt != 4 && (rawCnt & 1) != 0
+ * 我怀疑这个是个性能优化之一。
  */
 public abstract class ReferenceCountUpdater<T extends ReferenceCounted> {
     /*
@@ -60,19 +63,12 @@ public abstract class ReferenceCountUpdater<T extends ReferenceCounted> {
     }
 
     private static int realRefCnt(int rawCnt) {
-        return rawCnt != 2 && rawCnt != 4 && (rawCnt & 1) != 0 ? 0 : rawCnt >>> 1;
+        return rawCnt != 2 && rawCnt != 4 && (rawCnt & 1) != 0
+                ?
+                0 :  rawCnt >>> 1;
     }
 
-    /**
-     * Like {@link #realRefCnt(int)} but throws if refCnt == 0
-     */
-    private static int toLiveRealRefCnt(int rawCnt, int decrement) {
-        if (rawCnt == 2 || rawCnt == 4 || (rawCnt & 1) == 0) {
-            return rawCnt >>> 1;
-        }
-        // odd rawCnt => already deallocated
-        throw new IllegalReferenceCountException(0, -decrement);
-    }
+
 
     private int nonVolatileRawCnt(T instance) {
         // TODO: Once we compile against later versions of Java we can replace the Unsafe usage here by varhandles.
@@ -118,11 +114,13 @@ public abstract class ReferenceCountUpdater<T extends ReferenceCounted> {
 
     // rawIncrement == increment << 1
     private T retain0(T instance, final int increment, final int rawIncrement) {
+        // + 2
         int oldRef = updater().getAndAdd(instance, rawIncrement);
+        // 如果是奇数 代表已经被回收了
         if (oldRef != 2 && oldRef != 4 && (oldRef & 1) != 0) {
             throw new IllegalReferenceCountException(0, increment);
         }
-        // don't pass 0!
+        // don't pass 0!   如果之前 > 0  但是加了之后 比原来的小直接抛出异常
         if ((oldRef <= 0 && oldRef + rawIncrement >= 0)
                 || (oldRef >= 0 && oldRef + rawIncrement < oldRef)) {
             // overflow case
@@ -133,16 +131,32 @@ public abstract class ReferenceCountUpdater<T extends ReferenceCounted> {
     }
 
     public final boolean release(T instance) {
-        int rawCnt = nonVolatileRawCnt(instance);
-        return rawCnt == 2 ? tryFinalRelease0(instance, 2) || retryRelease0(instance, 1)
-                : nonFinalRelease0(instance, 1, rawCnt, toLiveRealRefCnt(rawCnt, 1));
+        int rawCnt = nonVolatileRawCnt(instance);// 通过unsafe 得到 reCnt 的值。但是暂时不明确 感觉确实 atmoicInteger 没什么不同的。
+        // 如果 引用计数 = 初始值 2 代表没有 retain 过 将值设置成1 直接释放？
+        return rawCnt == 2 ?
+                // 如果release 失败 那么 将引用计数 -2   真实的引用计数 等于 recnt / 2 也就是 >>> 1 因为 每次加 1 真实是加2
+                tryFinalRelease0(instance, 2) || retryRelease0(instance, 1)
+                :
+                nonFinalRelease0(instance, 1, rawCnt, toLiveRealRefCnt(rawCnt, 1));
     }
-
+    /**
+     * Like {@link #realRefCnt(int)} but throws if refCnt == 0
+     * 如果不是二的倍数代表 已经被回收了
+     */
+    private static int toLiveRealRefCnt(int rawCnt, int decrement) {
+        if (rawCnt == 2 || rawCnt == 4 || (rawCnt & 1) == 0) {
+            return rawCnt >>> 1;
+        }
+        // odd rawCnt => already deallocated
+        throw new IllegalReferenceCountException(0, -decrement);
+    }
     public final boolean release(T instance, int decrement) {
         int rawCnt = nonVolatileRawCnt(instance);
         int realCnt = toLiveRealRefCnt(rawCnt, checkPositive(decrement, "decrement"));
-        return decrement == realCnt ? tryFinalRelease0(instance, rawCnt) || retryRelease0(instance, decrement)
-                : nonFinalRelease0(instance, decrement, rawCnt, realCnt);
+        return decrement == realCnt ?
+                tryFinalRelease0(instance, rawCnt) || retryRelease0(instance, decrement)
+                :
+                nonFinalRelease0(instance, decrement, rawCnt, realCnt);
     }
 
     private boolean tryFinalRelease0(T instance, int expectRawCnt) {
@@ -150,6 +164,8 @@ public abstract class ReferenceCountUpdater<T extends ReferenceCounted> {
     }
 
     private boolean nonFinalRelease0(T instance, int decrement, int rawCnt, int realCnt) {
+        // 保证减去的值是小于 真实的 引用计数 否则就直接释放了  如果cas失败 也进下面的循环重复 - 2
+        // 其实我感觉所有 释放都可以走 retryRelease0
         if (decrement < realCnt
                 // all changes to the raw count are 2x the "real" change - overflow is OK
                 && updater().compareAndSet(instance, rawCnt, rawCnt - (decrement << 1))) {
@@ -159,13 +175,15 @@ public abstract class ReferenceCountUpdater<T extends ReferenceCounted> {
     }
 
     private boolean retryRelease0(T instance, int decrement) {
-        for (;;) {
+        for (;;) {  // reCnt value
             int rawCnt = updater().get(instance), realCnt = toLiveRealRefCnt(rawCnt, decrement);
+            // 如果 减去的值 = recnt直接释放
             if (decrement == realCnt) {
                 if (tryFinalRelease0(instance, rawCnt)) {
                     return true;
                 }
             } else if (decrement < realCnt) {
+                // netty 里面 为了 加 是 加2 减去也是减2 这个东西估计是优化吧 但是这个位运算你说有必要吗 我感觉是没必要
                 // all changes to the raw count are 2x the "real" change
                 if (updater().compareAndSet(instance, rawCnt, rawCnt - (decrement << 1))) {
                     return false;

@@ -22,11 +22,11 @@ import io.netty.util.ResourceLeakDetector;
 public class Server2 {
 
     public static void main(String[] args) throws Exception {
-//        ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.ADVANCED);
-//        ByteBuf byteBuf = PooledByteBufAllocator.DEFAULT.ioBuffer();
-//
-//        byteBuf.release();
+        ResourceLeakDetector.setLevel(ResourceLeakDetector.Level.ADVANCED);
+        ByteBuf byteBuf = PooledByteBufAllocator.DEFAULT.ioBuffer();
 
+        byteBuf.release();
+        ByteBuf byteBuf2 = PooledByteBufAllocator.DEFAULT.ioBuffer();
 
         final NioEventLoopGroup bos = new NioEventLoopGroup(1);
         final NioEventLoopGroup woker = new NioEventLoopGroup();
