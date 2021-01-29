@@ -47,6 +47,15 @@ public abstract class AbstractByteBufAllocator implements ByteBufAllocator {
      *                                          如果当 包装该byteBuff 的包装对象 正常 realse 函数释放掉了的话 那么  就会将  包装byteBuff 中的 追中器从 allLeak 中删除
      *                                          然后 将 成员变量=null 等待 gc 即可。然后当gc的时候 把 弱引用对象加入到 队列 然后 从队列中取出 如果 不在allLeak 代表正常reasle
      *                                          否则 就是没有reasle 那么就发生了 内存泄漏 那么 就遍历打印堆栈信息，
+     *
+     *
+     *
+     *                                          复习扣子
+     *                                          netty内存泄漏检测机制 通过创建buffer 实现一个 装饰对象
+     *                                          每调用 被装饰对象的时候都会纪录堆栈信息
+     *                                          释放的话 引用计数=0 就会从弱引用buffer 集合中删除
+     *                                          当发生gc 弱引用对象会被放置到弱引用队列中
+     *                                          如果之前 用来缓存弱引用buffer的set 能找到就能说没没 realse 就是内存泄漏了。
      * @param buf
      * @return
      */
